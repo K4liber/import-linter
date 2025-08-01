@@ -1,6 +1,6 @@
 import abc
 from enum import Enum
-from typing import Generic, Iterable, List, Set, Type, TypeVar, Union, cast
+from typing import Generic, Iterable, List, Set, Tuple, Type, TypeVar, Union, cast
 
 from importlinter.domain.imports import ImportExpression, Module, ModuleExpression
 
@@ -16,6 +16,10 @@ class NotSupplied:
 class ValidationError(Exception):
     def __init__(self, message: str) -> None:
         self.message = message
+
+
+class NotParsedError(Exception):
+    pass
 
 
 class Field(Generic[FieldValue], abc.ABC):
@@ -49,6 +53,7 @@ class Field(Generic[FieldValue], abc.ABC):
                 self.required = False
 
         self.default = default
+        self._value: Union[FieldValue, None] = None
 
     @abc.abstractmethod
     def parse(self, raw_data: Union[str, List[str]]) -> FieldValue:
@@ -60,24 +65,58 @@ class Field(Generic[FieldValue], abc.ABC):
         """
         raise NotImplementedError
 
+    def set_value(self, raw_data: Union[str, List[str]]) -> None:
+        """
+        Set the value of the field.
+        """
+        self._value = self.parse(raw_data=raw_data)
 
-class StringField(Field):
+    @property
+    def value(self) -> FieldValue:
+        """
+        The value of the field.
+
+        Raises:
+            NotParsedError if the field has not been parsed.
+        """
+        if self._value is None:
+            raise NotParsedError("Field has not been parsed.")
+
+        return self._value
+
+
+class StringField(Field[str]):
     """
     A field for single values of strings.
     """
 
-    def parse(self, raw_data: Union[str, List]) -> str:
+    def parse(self, raw_data: Union[str, List[str]]) -> str:
         if isinstance(raw_data, list):
             raise ValidationError("Expected a single value, got multiple values.")
+
         return str(raw_data)
 
 
-class BooleanField(Field):
+class IntegerField(Field[int]):
+    """
+    A field for single values of integers.
+    """
+
+    def parse(self, raw_data: Union[str, List[str]]) -> int:
+        if isinstance(raw_data, list):
+            raise ValidationError("Expected a single value, got multiple values.")
+        try:
+            return int(raw_data)
+        except ValueError:
+            raise ValidationError(f"Could not parse an integer from '{raw_data}'.")
+
+
+class BooleanField(Field[bool]):
     """
     A field for single values of booleans.
     """
 
-    def parse(self, raw_data: Union[str, List]) -> bool:
+    def parse(self, raw_data: Union[str, List[str]]) -> bool:
         if isinstance(raw_data, list):
             raise ValidationError("Expected a single value, got multiple values.")
 
@@ -89,7 +128,7 @@ class BooleanField(Field):
             raise ValidationError(f"Could not parse a boolean from '{raw_data}'.")
 
 
-class BaseMultipleValueField(Field):
+class BaseMultipleValueField(Generic[FieldValue], abc.ABC):
     """
     An abstract field for multiple values of any type.
 
@@ -99,17 +138,64 @@ class BaseMultipleValueField(Field):
 
     """
 
-    def __init__(self, subfield: Field, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(
+            self,
+            subfield: Field[FieldValue],
+            required: bool = False,
+            default: Union[Iterable[FieldValue], Type[NotSupplied]] = NotSupplied
+        ) -> None:
+        if default is NotSupplied:
+            if required is NotSupplied:
+                self.required = True
+            else:
+                self.required = required
+        else:
+            # A default was supplied.
+            if required is True:
+                # It doesn't make sense to require a field and provide a default.
+                raise ValueError("A required field cannot also provide a default value.")
+            else:
+                self.required = False
+
+        self.default = default
         self.subfield = subfield
+        self._value: Union[Iterable[FieldValue], None] = None
+
+    @property
+    def value(self) -> Iterable[FieldValue]:
+        """
+        The value of the field.
+
+        Raises:
+            NotParsedError if the field has not been parsed.
+        """
+        if self._value is None:
+            raise NotParsedError("Field has not been parsed.")
+
+        return self._value
 
     @abc.abstractmethod
-    def parse(self, raw_data: Union[str, List]) -> Iterable[FieldValue]:
+    def parse(self, raw_data: Union[str, List[str]]) -> Iterable[FieldValue]:
+        """
+        Given some raw data supplied by a user, return some clean data.
+
+        Raises:
+            ValidationError if the data is invalid.
+        """
+        raise NotImplementedError
+
+    def set_value(self, raw_data: Union[str, List[str]]) -> None:
+        """
+        Set the value of the field.
+        """
+        self._value = self.parse(raw_data=raw_data)
+
+    def _parse(self, raw_data: Union[str, List[str], Tuple[str]]) -> Iterable[FieldValue]:
         if isinstance(raw_data, tuple):
             raw_data = list(raw_data)
         if not isinstance(raw_data, list):
             raw_data = [raw_data]  # Single values should just be treated as a single item list.
-        clean_list = []
+        clean_list: Iterable[FieldValue] = []
         for raw_line in raw_data:
             # Ignore blank lines
             if not raw_line.strip():
@@ -118,7 +204,7 @@ class BaseMultipleValueField(Field):
         return clean_list
 
 
-class ListField(BaseMultipleValueField):
+class ListField(BaseMultipleValueField[FieldValue]):
     """
     A field for multiple values of any type.
 
@@ -129,11 +215,11 @@ class ListField(BaseMultipleValueField):
         field = ListField(subfield=AnotherField())
     """
 
-    def parse(self, raw_data: Union[str, List]) -> List[FieldValue]:
-        return list(super().parse(raw_data))
+    def parse(self, raw_data: Union[str, List[str], Tuple[str]]) -> List[FieldValue]:
+        return list(super()._parse(raw_data))
 
 
-class SetField(BaseMultipleValueField):
+class SetField(BaseMultipleValueField[FieldValue]):
     """
     A field for multiple, unique values of any type.
 
@@ -145,8 +231,8 @@ class SetField(BaseMultipleValueField):
 
     """
 
-    def parse(self, raw_data: Union[str, List]) -> Set[FieldValue]:
-        return set(super().parse(raw_data))
+    def parse(self, raw_data: Union[str, List[str], Tuple[str]]) -> Set[FieldValue]:
+        return set(super()._parse(raw_data))
 
 
 class ModuleField(Field):

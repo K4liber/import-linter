@@ -13,7 +13,7 @@ def _build_contract(
         session_options={},
         contract_options={
             "consider_package_dependencies": str(consider_package_dependencies),
-            "max_cycle_families": str(max_cycle_families),
+            "max_cycle_families": max_cycle_families,
         },
     )
 

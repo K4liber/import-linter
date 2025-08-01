@@ -1,5 +1,5 @@
 import abc
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type, Union
 
 from grimp import ImportGraph
 
@@ -23,7 +23,7 @@ class Contract(abc.ABC):
         Raises:
             InvalidContractOptions if the contract options could not be matched to the fields.
         """
-        errors = {}
+        errors: Dict[str, str] = {}
         for field_name in self.__class__._get_field_names():
             field = self.__class__._get_field(field_name)
 
@@ -39,11 +39,10 @@ class Contract(abc.ABC):
                 continue
 
             try:
-                clean_data = field.parse(raw_data)
+                field.set_value(raw_data)
             except fields.ValidationError as e:
                 errors[field_name] = str(e)
                 continue
-            setattr(self, field_name, clean_data)
 
         if errors:
             raise InvalidContractOptions(errors)
@@ -64,10 +63,10 @@ class Contract(abc.ABC):
         Returns:
             The names of all the fields on this contract class.
         """
-        return [name for name, attr in cls.__dict__.items() if isinstance(attr, fields.Field)]
+        return [name for name, attr in cls.__dict__.items() if isinstance(attr, (fields.Field, fields.BaseMultipleValueField))]
 
     @classmethod
-    def _get_field(cls, field_name: str) -> fields.Field:
+    def _get_field(cls, field_name: str) -> Union[fields.Field, fields.BaseMultipleValueField]:
         return getattr(cls, field_name)
 
     @abc.abstractmethod
