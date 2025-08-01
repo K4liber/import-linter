@@ -182,7 +182,7 @@ class AcyclicContract(Contract):
     type_name = "acyclic"
 
     consider_package_dependencies = fields.BooleanField(required=False, default=True)
-    max_cycle_families = fields.StringField(required=False, default="0")
+    max_cycle_families = fields.IntegerField(required=False, default=0)
     include_parents = fields.ListField(subfield=fields.StringField(), required=False, default=[])
     exclude_parents = fields.ListField(subfield=fields.StringField(), required=False, default=[])
 
@@ -196,17 +196,17 @@ class AcyclicContract(Contract):
         if verbose:
             configuration_heading_msg = [
                 "CONFIG:\n",
-                f"Consider package dependencies: {self._consider_package_dependencies}",
+                f"Consider package dependencies: {self.consider_package_dependencies.value}",
                 f"Max cycle families: {self._max_cycles_families}",
                 f"Include parents: {self._include_parents}",
-                f"Exclude parents: {self._exclude_parents}",
+                f"Exclude parents: {self.exclude_parents.value}",
             ]
             output.print_heading(text="\n".join(configuration_heading_msg), level=2)
 
         contract_metadata: dict[str, Any] = {}
         # If we consider package dependencies,
         # we need to expand the graph with the artificialy created package dependencies.
-        if self._consider_package_dependencies:
+        if self.consider_package_dependencies.value:
             graph = copy.deepcopy(graph)
             already_added_package_dependencies: set[tuple[str, str]] = set()
 
@@ -385,7 +385,7 @@ class AcyclicContract(Contract):
 
         It is useful for a better understanding of package dependencies.
         """
-        if self._consider_package_dependencies is False:
+        if self.consider_package_dependencies.value is False:
             return cycle, False
 
         formatted_members: list[str] = []
@@ -425,27 +425,23 @@ class AcyclicContract(Contract):
         return Cycle(members=tuple(formatted_members)), is_package_dependency
 
     @property
-    def _consider_package_dependencies(self) -> bool:
-        return str(self.consider_package_dependencies).lower() == "true"
-
-    @property
     def _max_cycles_families(self) -> Optional[int]:
-        value_int = int(str(self.max_cycle_families))
-        return None if value_int < 1 else value_int
+        max_cycle_families_value = self.max_cycle_families.value
+        return None if max_cycle_families_value < 1 else max_cycle_families_value
 
     @property
     def _include_parents(self) -> Optional[list[str]]:
         if not self.include_parents:
             return None
 
-        return [module for module in self.include_parents if module]  # type: ignore
+        return [module for module in self.include_parents.value]
 
     @property
     def _exclude_parents(self) -> Optional[list[str]]:
         if not self.exclude_parents:
             return None
 
-        return [module for module in self.exclude_parents if module]  # type: ignore
+        return [module for module in self.exclude_parents.value]
 
     @staticmethod
     def _set_cycles_in_metadata(check: ContractCheck, cycle_families: list[CyclesFamily]) -> None:
